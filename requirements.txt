@@ -1,0 +1,14 @@
+# Python Core Dependencies
+
+# For global hotkey listening
+pynput
+
+# For audio recording
+sounddevice
+numpy
+
+# For making HTTP requests to ASR and LLM APIs
+requests
+
+# For clipboard operations
+pyperclip

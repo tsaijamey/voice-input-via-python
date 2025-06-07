@@ -1,0 +1,24 @@
+{
+  "hotkeys": {
+    "start_recording": ["alt+shift+r", "cmd+shift+r"],
+    "stop_recording": ["alt+shift+s", "cmd+shift+s"]
+  },
+  "recording": {
+    "countdown_seconds": 10,
+    "audio_format": "wav"
+  },
+  "asr_provider": {
+    "name": "groq_whisper",
+    "endpoint": "YOUR_GROQ_WHISPER_ENDPOINT_HERE",
+    "api_key": "YOUR_GROQ_API_KEY_HERE"
+  },
+  "llm_provider": {
+    "name": "groq_llama3_70b",
+    "endpoint": "YOUR_GROQ_LLAMA3_ENDPOINT_HERE",
+    "api_key": "YOUR_GROQ_API_KEY_HERE"
+  },
+  "proxy": {
+    "http": "http://localhost:7890",
+    "https": "http://localhost:7890"
+  }
+}
