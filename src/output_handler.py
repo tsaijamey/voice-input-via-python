@@ -7,6 +7,7 @@ the clipboard and saving to a file.
 import pyperclip
 from datetime import datetime
 import os
+import json
 
 
 def copy_to_clipboard(text: str):
@@ -23,25 +24,45 @@ def copy_to_clipboard(text: str):
         print(f"❌ Error copying to clipboard: {e}")
 
 
-def save_to_file(text: str, output_dir: str = "recordings"):
+def save_to_file(
+    raw_text: str,
+    corrected_text: str,
+    enhanced_text: str | None,
+    vision_analysis: dict | None,
+    output_dir: str = "recordings",
+):
     """
-    Saves the given text to a file with a timestamped name.
+    Saves all versions of recognized text and vision analysis to a timestamped JSON file.
 
     Args:
-        text (str): The text to be saved.
+        raw_text (str): The raw text from ASR.
+        corrected_text (str): The text after basic correction.
+        enhanced_text (str | None): The final text after content enhancement.
+        vision_analysis (dict | None): A dictionary with vision analysis results.
         output_dir (str): The directory where the file will be saved.
-                          Defaults to "recordings".
     """
     try:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"{timestamp}_speech_recognized.txt"
+        filename = f"{timestamp}_recognition_result.json"
         filepath = os.path.join(output_dir, filename)
 
+        # 准备要保存的完整数据
+        output_data = {
+            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            "text_versions": {
+                "raw_asr": raw_text,
+                "corrected_asr": corrected_text,
+                "enhanced_final": enhanced_text,
+            },
+            "vision_analysis": vision_analysis,
+        }
+
         with open(filepath, "w", encoding="utf-8") as f:
-            f.write(text)
-        print(f"✅ Text saved to file: {filepath}")
+            json.dump(output_data, f, ensure_ascii=False, indent=4)
+
+        print(f"✅ Full recognition result saved to file: {filepath}")
     except IOError as e:
         print(f"❌ Error saving to file: {e}")

@@ -21,10 +21,11 @@ from services.vision_service import VisionService
 from services.content_enhancement_service import ContentEnhancementService
 from utils.screenshot_util import take_screenshot, resize_image, save_screenshot
 from output_handler import copy_to_clipboard, save_to_file
+from services.input_automation_service import InputAutomationService
 
 class Communicate(QObject):
     """用于跨线程通信的信号类"""
-    toggle_signal = Signal(bool)
+    toggle_signal = Signal(bool, object)
 
 def setup_logging():
     """配置日志记录"""
@@ -65,7 +66,9 @@ def main():
         transcription_worker_thread = None
         vision_worker_thread = None
         full_transcript = []
+        raw_transcript_list = [] # 新增：用于存储原始未修正的文本
         screen_context_result = None
+        focused_window_at_start = None # 新增：用于保存录音开始时的窗口
         
         chunk_seconds = config['recording'].get('realtime_chunk_seconds', 10)
         chunk_size = int(chunk_seconds * recording_service.sample_rate)
@@ -104,6 +107,7 @@ def main():
                 if transcript:
                     # 1. 显示原始转录结果
                     logger.info(f"实时转录 (原始): {transcript}")
+                    raw_transcript_list.append(transcript) # 保存原始文本
                     
                     # 2. 对实时转录的片段进行修正
                     corrected_chunk = asr_service.correct_text(transcript)
@@ -118,11 +122,12 @@ def main():
         
         communicator = Communicate()
         
-        def handle_toggle_recording(start: bool):
-            nonlocal is_recording, transcription_worker_thread, vision_worker_thread, full_transcript, screen_context_result
+        def handle_toggle_recording(start: bool, window=None):
+            nonlocal is_recording, transcription_worker_thread, vision_worker_thread, full_transcript, screen_context_result, raw_transcript_list, focused_window_at_start
             
             if start and not is_recording:
                 is_recording = True
+                focused_window_at_start = window # 保存窗口信息
                 logger.info("Recording started...")
                 
                 # --- 并行任务启动 ---
@@ -141,6 +146,7 @@ def main():
 
                 # 2. 启动录音和ASR转录线程
                 full_transcript = []
+                raw_transcript_list = [] # 重置原始文本列表
                 while not audio_queue.empty():
                     audio_queue.get_nowait()
 
@@ -169,28 +175,58 @@ def main():
                 if vision_worker_thread:
                     vision_worker_thread.join(timeout=20.0) # 视觉分析可能更耗时
 
-                final_text = ' '.join(full_transcript)
-                logger.info(f"最终识别文本: {final_text}")
+                raw_text = ' '.join(raw_transcript_list)
+                corrected_text = ' '.join(full_transcript)
+                logger.info(f"最终识别文本 (原始): {raw_text}")
+                logger.info(f"最终识别文本 (修正): {corrected_text}")
                 logger.info(f"最终屏幕上下文: {screen_context_result}")
 
-                if final_text and screen_context_result:
+                # 根据是否有修正后的文本来决定后续流程
+                final_text_for_processing = corrected_text if corrected_text else raw_text
+
+                if final_text_for_processing and screen_context_result:
                     # --- 内容增强 ---
-                    enhanced_text = enhancement_service.enhance_text(final_text, screen_context_result)
+                    enhanced_text = enhancement_service.enhance_text(final_text_for_processing, screen_context_result)
                     logger.info(f"增强后文本: {enhanced_text}")
-                    copy_to_clipboard(enhanced_text)
-                    save_to_file(enhanced_text)
-                elif final_text:
-                    # 如果视觉分析失败，则回退到只输出原始文本
-                    logger.warning("Vision analysis failed or returned no result. Falling back to original transcript.")
-                    copy_to_clipboard(final_text)
-                    save_to_file(final_text)
+                    
+                    # 决定粘贴或复制哪个文本
+                    output_text = enhanced_text
+                    if config['output'].get('mode', 'clipboard') == 'paste' and focused_window_at_start:
+                        InputAutomationService.paste_to_window(focused_window_at_start, output_text)
+                    else:
+                        copy_to_clipboard(output_text)
+                    
+                    # 保存所有版本
+                    save_to_file(
+                        raw_text=raw_text,
+                        corrected_text=corrected_text,
+                        enhanced_text=enhanced_text,
+                        vision_analysis=screen_context_result
+                    )
+                elif final_text_for_processing:
+                    # 如果视觉分析失败，则回退到只输出识别文本
+                    logger.warning("Vision analysis failed or returned no result. Falling back to transcript.")
+                    output_text = final_text_for_processing
+                    if config['output'].get('mode', 'clipboard') == 'paste' and focused_window_at_start:
+                        InputAutomationService.paste_to_window(focused_window_at_start, output_text)
+                    else:
+                        copy_to_clipboard(output_text)
+                    
+                    # 仍然保存所有可用信息
+                    save_to_file(
+                        raw_text=raw_text,
+                        corrected_text=corrected_text,
+                        enhanced_text=None, # 没有增强文本
+                        vision_analysis=screen_context_result # 可能是None
+                    )
                 else:
                     logger.warning("没有识别到任何文本，跳过输出。")
 
                 control_widget.set_idle_state()
+                focused_window_at_start = None # 重置窗口信息
 
         # --- 连接所有信号到统一的处理器 ---
-        communicator.toggle_signal.connect(lambda start: handle_toggle_recording(start))
+        communicator.toggle_signal.connect(handle_toggle_recording)
         control_widget.start_requested.connect(lambda: handle_toggle_recording(True))
         control_widget.stop_requested.connect(lambda: handle_toggle_recording(False))
         
@@ -222,8 +258,8 @@ def main():
         timer.start(500)
         timer.timeout.connect(lambda: None)
 
-        def on_toggle_recording_emitter(is_start: bool):
-            communicator.toggle_signal.emit(is_start)
+        def on_toggle_recording_emitter(is_start: bool, window=None):
+            communicator.toggle_signal.emit(is_start, window)
 
         hotkey_manager.register_toggle(
             config['hotkeys']['toggle_recording'],
