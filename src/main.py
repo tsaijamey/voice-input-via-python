@@ -110,8 +110,9 @@ def main():
                     logger.info(f"实时转录 (修正): {corrected_chunk}")
                     
                     full_transcript.append(corrected_chunk)
-                    logger.info(f"当前完整文本: {' '.join(full_transcript)}")
-                    communicator.transcription_update_signal.emit(corrected_chunk, True) # True表示追加
+                    current_full_text = ' '.join(full_transcript)
+                    logger.info(f"当前完整文本: {current_full_text}")
+                    communicator.transcription_update_signal.emit(current_full_text, False) # False表示覆盖
                 
                 audio_queue.task_done()
             logger.info("Transcription worker finished.")
