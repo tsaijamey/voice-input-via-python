@@ -194,6 +194,7 @@ cython_debug/
 .cursorindexingignore
 # Custom ignores for this project
 .DS_Store
+.gitkeep
 recordings/
 docs/plans/
 docs/HOWTO/
