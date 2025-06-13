@@ -24,10 +24,33 @@ class ConfigLoader:
             self._config = json.load(f)
             
         self._validate_base_structure()
+        # 在解析前，保存一份原始的服务配置
+        self._config['original_services'] = json.loads(json.dumps(self._config.get('services', {})))
         self._resolve_services()
         self._validate_resolved_services()
         
         return self._config
+
+    def save(self, config_data: dict):
+        """将更新后的配置字典写回到 config.json"""
+        # 创建一个用于保存的配置副本
+        config_to_save = config_data.copy()
+        
+        # 使用原始的服务结构进行保存
+        services_to_save = config_data.get('original_services', {})
+        
+        # 更新原始服务配置中的 'enabled' 状态
+        for service_name, service_config in config_data.get('services', {}).items():
+            if service_name in services_to_save and 'enabled' in service_config:
+                services_to_save[service_name]['enabled'] = service_config['enabled']
+
+        config_to_save['services'] = services_to_save
+        
+        # 移除不应保存到文件中的临时数据
+        config_to_save.pop('original_services', None)
+
+        with open(self.config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_to_save, f, indent=2, ensure_ascii=False)
 
     def _validate_base_structure(self) -> None:
         """验证配置文件顶层结构"""
@@ -47,6 +70,10 @@ class ConfigLoader:
             model_index = service_config.get('model_index')
 
             if provider_index is None or model_index is None:
+                # 对于没有 provider_index 的服务（例如，只有 enabled 开关），跳过解析
+                if 'enabled' in service_config:
+                    resolved_services[service_name] = service_config.copy()
+                    continue
                 raise ValueError(f"Service '{service_name}' is missing 'provider_index' or 'model_index'.")
 
             if not (0 <= provider_index < len(providers)):

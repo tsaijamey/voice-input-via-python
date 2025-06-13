@@ -12,15 +12,24 @@
       "name": "groq",
       "api_key_env": "GROQ_API_KEY",
       "models": [
-        { "name": "whisper-large-v3", "type": "asr" },
-        { "name": "llama-3.3-70b-versatile", "type": "llm" }
+        {
+          "name": "whisper-large-v3",
+          "type": "asr"
+        },
+        {
+          "name": "llama-3.3-70b-versatile",
+          "type": "llm"
+        }
       ]
     },
     {
       "name": "google",
       "api_key_env": "GEMINI_API_KEY",
       "models": [
-        { "name": "gemini-2.5-flash-preview-05-20", "type": "vision" }
+        {
+          "name": "gemini-2.5-flash-preview-05-20",
+          "type": "vision"
+        }
       ]
     }
   ],
@@ -40,6 +49,7 @@
       "max_width": 1200
     },
     "content_enhancement": {
+      "enabled": false,
       "provider_index": 0,
       "model_index": 1
     }
