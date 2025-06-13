@@ -17,6 +17,9 @@ from core.hotkey_manager import HotkeyManager
 from services.recording_service import RecordingService
 from services.asr_service import ASRService
 from services.timer_overlay import ControlWidget
+from services.vision_service import VisionService
+from services.content_enhancement_service import ContentEnhancementService
+from utils.screenshot_util import take_screenshot, resize_image, save_screenshot
 from output_handler import copy_to_clipboard, save_to_file
 
 class Communicate(QObject):
@@ -48,13 +51,21 @@ def main():
         # --- 初始化服务和状态 ---
         hotkey_manager = HotkeyManager()
         recording_service = RecordingService()
-        asr_service = ASRService(config)
+        asr_service = ASRService(
+            asr_config=config['services']['asr'],
+            correction_config=config['services']['text_correction']
+        )
         control_widget = ControlWidget()
+        vision_service = VisionService(config['services']['vision'])
+        enhancement_service = ContentEnhancementService(config['services']['content_enhancement'])
+        max_screenshot_width = config['services']['vision'].get('max_width', 1200)
         
         is_recording = False
         audio_queue = queue.Queue()
         transcription_worker_thread = None
+        vision_worker_thread = None
         full_transcript = []
+        screen_context_result = None
         
         chunk_seconds = config['recording'].get('realtime_chunk_seconds', 10)
         chunk_size = int(chunk_seconds * recording_service.sample_rate)
@@ -108,12 +119,27 @@ def main():
         communicator = Communicate()
         
         def handle_toggle_recording(start: bool):
-            nonlocal is_recording, transcription_worker_thread, full_transcript
+            nonlocal is_recording, transcription_worker_thread, vision_worker_thread, full_transcript, screen_context_result
             
             if start and not is_recording:
                 is_recording = True
                 logger.info("Recording started...")
                 
+                # --- 并行任务启动 ---
+                # 1. 启动视觉分析线程
+                def vision_worker():
+                    nonlocal screen_context_result
+                    logger.info("Capturing and analyzing screen...")
+                    screenshot = take_screenshot()
+                    resized_screenshot = resize_image(screenshot, max_screenshot_width)
+                    save_screenshot(resized_screenshot) # 保存调整尺寸后的截图
+                    screen_context_result = vision_service.analyze_screenshot(resized_screenshot)
+                    logger.info("Screen analysis complete.")
+
+                vision_worker_thread = threading.Thread(target=vision_worker, daemon=True)
+                vision_worker_thread.start()
+
+                # 2. 启动录音和ASR转录线程
                 full_transcript = []
                 while not audio_queue.empty():
                     audio_queue.get_nowait()
@@ -124,27 +150,38 @@ def main():
                 countdown = config['recording'].get('countdown_seconds', 60)
                 control_widget.set_recording_state(countdown)
                 
-                # 将分块逻辑完全委托给 RecordingService
                 recording_service.start_recording(audio_queue, chunk_size)
 
             elif not start and is_recording:
                 is_recording = False
                 logger.info("Recording stopped...")
                 
-                # 停止录音并处理剩余的音频数据
+                # 停止录音
                 recording_service.stop_recording()
                 
-                # 发送结束信号给转录工作线程
+                # 发送结束信号给ASR转录工作线程
                 audio_queue.put(None)
+                
+                # --- 等待并行任务完成 ---
+                logger.info("Waiting for transcription and vision analysis to complete...")
                 if transcription_worker_thread:
-                    transcription_worker_thread.join(timeout=5.0)
+                    transcription_worker_thread.join(timeout=10.0) # 增加超时
+                if vision_worker_thread:
+                    vision_worker_thread.join(timeout=20.0) # 视觉分析可能更耗时
 
                 final_text = ' '.join(full_transcript)
                 logger.info(f"最终识别文本: {final_text}")
+                logger.info(f"最终屏幕上下文: {screen_context_result}")
 
-                if final_text:
-                    # 文本在生成过程中已被逐段修正，此处直接输出
-                    logger.info(f"最终完整文本: {final_text}")
+                if final_text and screen_context_result:
+                    # --- 内容增强 ---
+                    enhanced_text = enhancement_service.enhance_text(final_text, screen_context_result)
+                    logger.info(f"增强后文本: {enhanced_text}")
+                    copy_to_clipboard(enhanced_text)
+                    save_to_file(enhanced_text)
+                elif final_text:
+                    # 如果视觉分析失败，则回退到只输出原始文本
+                    logger.warning("Vision analysis failed or returned no result. Falling back to original transcript.")
                     copy_to_clipboard(final_text)
                     save_to_file(final_text)
                 else:

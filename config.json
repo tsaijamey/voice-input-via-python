@@ -7,17 +7,49 @@
     "audio_format": "wav",
     "realtime_chunk_seconds": 10
   },
-  "asr_provider": {
-    "name": "groq_whisper",
-    "model": "whisper-large-v3"
-  },
-  "llm_provider": {
-    "name": "groq_llama3_70b",
-    "model": "llama-3.3-70b-versatile",
-    "temperature": 0.7
+  "providers": [
+    {
+      "name": "groq",
+      "api_key_env": "GROQ_API_KEY",
+      "models": [
+        { "name": "whisper-large-v3", "type": "asr" },
+        { "name": "llama-3.3-70b-versatile", "type": "llm" }
+      ]
+    },
+    {
+      "name": "google",
+      "api_key_env": "GEMINI_API_KEY",
+      "models": [
+        { "name": "gemini-2.5-flash-preview-05-20", "type": "vision" }
+      ]
+    }
+  ],
+  "services": {
+    "asr": {
+      "provider_index": 0,
+      "model_index": 0
+    },
+    "text_correction": {
+      "provider_index": 0,
+      "model_index": 1,
+      "temperature": 0.3
+    },
+    "vision": {
+      "provider_index": 1,
+      "model_index": 0,
+      "max_width": 1200
+    },
+    "content_enhancement": {
+      "provider_index": 0,
+      "model_index": 1
+    }
   },
   "proxy": {
     "http": "http://localhost:7890",
     "https": "http://localhost:7890"
+  },
+  "output": {
+    "save_to_file": true,
+    "filepath": "output.txt"
   }
 }

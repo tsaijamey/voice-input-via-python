@@ -8,29 +8,32 @@ import io
 class ASRService:
     """语音识别服务，使用Groq官方Python客户端"""
     
-    def __init__(self, config: dict):
-        self.asr_config = config['asr_provider']
-        self.llm_config = config.get('llm_provider', {})
-        self.proxy_config = config.get('proxy')
+    def __init__(self, asr_config: dict, correction_config: dict, proxy_config: dict = None):
+        self.asr_config = asr_config
+        self.correction_config = correction_config
+        self.proxy_config = proxy_config or {}
         self.logger = logging.getLogger(__name__)
-        self.client = self._init_client()
 
-    def _init_client(self) -> Groq:
-        """根据配置初始化Groq客户端，包括API密钥和代理"""
-        api_key = os.getenv("GROQ_API_KEY")
+        # 为 ASR 和修正分别初始化客户端，以支持它们使用不同的 provider
+        self.asr_client = self._init_client(self.asr_config)
+        self.correction_client = self._init_client(self.correction_config)
+
+    def _init_client(self, config: dict) -> Groq:
+        """根据配置初始化客户端"""
+        api_key = config.get('api_key')
         if not api_key:
-            raise ValueError("GROQ_API_KEY environment variable not set.")
+            raise ValueError(f"API key not found for provider {config.get('provider')}")
 
-        if self.proxy_config and self.proxy_config.get('http'):
-            from httpx import Client
-            proxies = {
-                "http://": self.proxy_config['http'],
-                "https://": self.proxy_config.get('https', self.proxy_config['http']),
-            }
-            http_client = Client(proxies=proxies)
-            return Groq(api_key=api_key, http_client=http_client)
-        else:
+        # 代理设置
+        if self.proxy_config.get('http'):
+            os.environ['HTTP_PROXY'] = self.proxy_config['http']
+            os.environ['HTTPS_PROXY'] = self.proxy_config.get('https', self.proxy_config['http'])
+        
+        # 目前只支持 Groq，未来可以扩展
+        if config.get('provider') == 'groq':
             return Groq(api_key=api_key)
+        else:
+            raise NotImplementedError(f"Provider '{config.get('provider')}' is not supported in ASRService.")
         
     def transcribe(self, audio_source: Union[str, io.BytesIO], language: str = "zh") -> Optional[str]:
         """转录音频文件或内存数据为文本
@@ -41,14 +44,14 @@ class ASRService:
         try:
             if isinstance(audio_source, str):
                 with open(audio_source, 'rb') as audio_file:
-                    response = self.client.audio.transcriptions.create(
+                    response = self.asr_client.audio.transcriptions.create(
                         file=("audio.wav", audio_file.read()),
                         model=self.asr_config['model'],
                         language=language
                     )
             elif isinstance(audio_source, io.BytesIO):
                 audio_source.seek(0) # 确保从头读取
-                response = self.client.audio.transcriptions.create(
+                response = self.asr_client.audio.transcriptions.create(
                     file=("audio.wav", audio_source.read()),
                     model=self.asr_config['model'],
                     language=language
@@ -107,22 +110,22 @@ class ASRService:
         Returns:
             str: 经过LLM修正后的文本。
         """
-        if not self.llm_config:
-            self.logger.warning("LLM provider not configured. Skipping text correction.")
+        if not self.correction_config:
+            self.logger.warning("Correction model not configured. Skipping text correction.")
             return text
 
         try:
-            chat_completion = self.client.chat.completions.create(
+            chat_completion = self.correction_client.chat.completions.create(
                 messages=[
                     {
                         "role": "system",
                         "content": (
-                            "你是一个专业的速记员和文本润色师。"
-                            "你的任务是修正ASR（自动语音识别）的输出结果。"
-                            "请遵循以下规则：\n"
-                            "1.  修正明显的识别错误。\n"
-                            "2.  添加正确的标点符号，使句子通顺流畅。\n"
-                            "3.  保留原始文本的口语风格，不要过度书面化。\n"
+                            "你是一个专业的速记员和文本修正师。"
+                            "你的任务是修正ASR（自动语音识别）的输出结果，而不是润色或再创作。"
+                            "请严格遵循以下规则：\n"
+                            "1.  **仅**修正发音相似但明显错误的词语（例如，错别字）。\n"
+                            "2.  添加必要的标点符号，使句子结构完整。\n"
+                            "3.  **严格保留**原始文本的口语风格和用词，**禁止**进行书面化或“美化”处理。例如，如果用户说“很二”，就保留“很二”，不要改成“不好”或“很好”。\n"
                             "4.  如果内容包含代码或专业术语，请确保其格式正确。\n"
                             "5.  直接输出修正后的文本，不要包含任何解释或额外说明。"
                         )
@@ -132,8 +135,8 @@ class ASRService:
                         "content": f"请修正以下ASR识别结果：\n\n{text}",
                     }
                 ],
-                model=self.llm_config['model'],
-                temperature=self.llm_config.get('temperature', 0.7),
+                model=self.correction_config['model'],
+                temperature=self.correction_config.get('temperature', 0.7),
             )
             corrected_text = chat_completion.choices[0].message.content
             return corrected_text.strip() if corrected_text else text
