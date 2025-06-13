@@ -1,6 +1,7 @@
 from pynput import keyboard
 from typing import Callable, Optional
 import logging
+from services.input_automation_service import InputAutomationService
 
 class HotkeyManager:
     """简化版热键管理器，使用单个修饰键切换录音状态"""
@@ -43,7 +44,8 @@ class HotkeyManager:
             key_str = self._get_key_str(key)
             if key_str == self.toggle_key and not self.is_pressed:
                 self.is_pressed = True
-                self.toggle_callback(True)  # 开始录音
+                window = InputAutomationService.get_window_under_cursor()
+                self.toggle_callback(True, window)  # 开始录音
         except Exception as e:
             self.logger.error(f"Key press error: {e}")
             
@@ -53,7 +55,7 @@ class HotkeyManager:
             key_str = self._get_key_str(key)
             if key_str == self.toggle_key and self.is_pressed:
                 self.is_pressed = False
-                self.toggle_callback(False)  # 停止录音
+                self.toggle_callback(False, None)  # 停止录音
         except Exception as e:
             self.logger.error(f"Key release error: {e}")
             

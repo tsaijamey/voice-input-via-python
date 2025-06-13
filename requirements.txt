@@ -11,4 +11,5 @@ PySide6==6.9.1
 # Google GenAI (参考code_sample/gemini.py)
 google-genai==1.20.0
 
-pyautogui
+pyautogui==0.9.54
+PyGetWindow==0.0.9
