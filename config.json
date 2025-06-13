@@ -52,7 +52,7 @@
       "max_width": 1200
     },
     "content_enhancement": {
-      "enabled": false,
+      "enabled": true,
       "provider_index": 0,
       "model_index": 1
     }

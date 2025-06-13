@@ -132,7 +132,7 @@ class ASRService:
                     },
                     {
                         "role": "user",
-                        "content": f"请修正以下ASR识别结果：\n\n{text}",
+                        "content": f"请修正以下ASR识别结果：\n\n{text}\n\n 输出格式：\n[修正后的文本内容]",
                     }
                 ],
                 model=self.correction_config['model'],
