@@ -26,6 +26,7 @@ from services.input_automation_service import InputAutomationService
 class Communicate(QObject):
     """用于跨线程通信的信号类"""
     toggle_signal = Signal(bool, object)
+    transcription_update_signal = Signal(str, bool)  # 信号：(文本, 是否追加)
 
 def setup_logging():
     """配置日志记录"""
@@ -52,7 +53,7 @@ def main():
         
         # --- 初始化服务和状态 ---
         hotkey_manager = HotkeyManager()
-        recording_service = RecordingService()
+        recording_service = RecordingService(config['recording'])
         asr_service = ASRService(
             asr_config=config['services']['asr'],
             correction_config=config['services']['text_correction']
@@ -71,8 +72,6 @@ def main():
         screen_context_result = None
         focused_window_at_start = None # 新增：用于保存录音开始时的窗口
         
-        chunk_seconds = config['recording'].get('realtime_chunk_seconds', 10)
-        chunk_size = int(chunk_seconds * recording_service.sample_rate)
 
         def transcription_worker():
             min_chunk_samples = int(0.5 * recording_service.sample_rate)
@@ -112,11 +111,15 @@ def main():
                     
                     full_transcript.append(corrected_chunk)
                     logger.info(f"当前完整文本: {' '.join(full_transcript)}")
+                    communicator.transcription_update_signal.emit(corrected_chunk, True) # True表示追加
                 
                 audio_queue.task_done()
             logger.info("Transcription worker finished.")
         
         communicator = Communicate()
+        
+        # 连接转写更新信号到UI控件
+        communicator.transcription_update_signal.connect(control_widget.update_transcription) # 连接信号到槽
         
         def handle_toggle_recording(start: bool, window=None):
             nonlocal is_recording, transcription_worker_thread, vision_worker_thread, full_transcript, screen_context_result, raw_transcript_list, focused_window_at_start
@@ -152,9 +155,11 @@ def main():
                 transcription_worker_thread.start()
                 
                 countdown = config['recording'].get('countdown_seconds', 60)
+                control_widget.set_idle_state()  # 确保清空上一次的结果
+                control_widget.transcription_label.clear()
                 control_widget.set_recording_state(countdown)
                 
-                recording_service.start_recording(audio_queue, chunk_size)
+                recording_service.start_recording(audio_queue)
 
             elif not start and is_recording:
                 is_recording = False
@@ -204,7 +209,9 @@ def main():
                     vision_analysis=screen_context_result
                 )
 
-                control_widget.set_idle_state()
+                # set_finished_state 内部会调用 update_transcription(text, append=False)
+                # 这会用最终文本覆盖掉实时追加的内容
+                control_widget.set_finished_state(output_text or "")
                 focused_window_at_start = None
 
         communicator.toggle_signal.connect(handle_toggle_recording)

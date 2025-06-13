@@ -5,7 +5,10 @@
   "recording": {
     "countdown_seconds": 60,
     "audio_format": "wav",
-    "realtime_chunk_seconds": 10
+    "realtime_chunk_seconds": 3,
+    "realtime_split_silence_threshold": 100,
+    "realtime_split_ratio": 0.6,
+    "min_chunk_duration_ms": 300
   },
   "providers": [
     {
@@ -59,9 +62,9 @@
     "https": "http://localhost:7890"
   },
   "output": {
-    "_comment": "The 'mode' determines the output action. Use 'clipboard' to copy the result to the clipboard, or 'paste' to paste it directly into the last active window.",
+    "_comment": "The 'mode' determines the output action. Use 'clipboard' to copy the result to the clipboard, or 'paste'(beta test, not good in MacOS) to paste it directly into the last active window.",
     "save_to_file": true,
     "filepath": "output.txt",
-    "mode": "paste"
+    "mode": "clipboard"
   }
 }

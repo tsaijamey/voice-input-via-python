@@ -1,7 +1,9 @@
 import os
 import logging
+import re
 from google import genai
 from google.genai import types
+from groq import Groq
 
 class ContentEnhancementService:
     def __init__(self, config: dict):
@@ -17,10 +19,8 @@ class ContentEnhancementService:
 
         provider = config.get('provider')
         if provider == 'google':
-            from google import genai
             self.client = genai.Client(api_key=api_key)
         elif provider == 'groq':
-            from groq import Groq
             self.client = Groq(api_key=api_key)
         else:
             raise NotImplementedError(f"Provider '{provider}' is not supported in ContentEnhancementService.")
@@ -117,6 +117,10 @@ class ContentEnhancementService:
                     if content:
                         response += content
             
+            if isinstance(self.client, Groq):
+                self.logger.info(f"Original response from groq: {response}")
+                response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+
             self.logger.info(f"Enhanced text received: {response}")
             return response.strip()
         except Exception as e:

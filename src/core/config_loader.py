@@ -33,22 +33,22 @@ class ConfigLoader:
 
     def save(self, config_data: dict):
         """将更新后的配置字典写回到 config.json"""
-        # 创建一个用于保存的配置副本
-        config_to_save = config_data.copy()
-        
-        # 使用原始的服务结构进行保存
-        services_to_save = config_data.get('original_services', {})
-        
-        # 更新原始服务配置中的 'enabled' 状态
-        for service_name, service_config in config_data.get('services', {}).items():
-            if service_name in services_to_save and 'enabled' in service_config:
-                services_to_save[service_name]['enabled'] = service_config['enabled']
+        # 创建一个新的配置字典用于保存，以确保原始的 config_data 在函数外部不被修改
+        config_to_save = json.loads(json.dumps(config_data))
 
-        config_to_save['services'] = services_to_save
+        # 从 services 中移除解析时动态添加的键，只保留用户设置
+        if 'services' in config_to_save:
+            services_to_save = config_to_save['services']
+            resolved_keys_to_remove = ['provider', 'model', 'api_key', 'name', 'type']
+            for service_config in services_to_save.values():
+                for key in resolved_keys_to_remove:
+                    # 使用 .pop() 而不是 del，以避免在键不存在时出错
+                    service_config.pop(key, None)
         
-        # 移除不应保存到文件中的临时数据
-        config_to_save.pop('original_services', None)
-
+        # 移除临时的原始服务配置备份
+        if 'original_services' in config_to_save:
+            del config_to_save['original_services']
+            
         with open(self.config_path, 'w', encoding='utf-8') as f:
             json.dump(config_to_save, f, indent=2, ensure_ascii=False)
 
