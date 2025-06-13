@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QLabel, QWidget, QPushButton, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QApplication, QLabel, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QCheckBox
 from PySide6.QtGui import QScreen, QMouseEvent
 
 class ControlWidget(QWidget):
@@ -14,6 +14,7 @@ class ControlWidget(QWidget):
     start_requested = Signal()
     stop_requested = Signal()
     exit_requested = Signal()
+    enhancement_toggled = Signal(bool)
 
     def __init__(self, bg_color: str = 'black', text_color: str = 'white', font_size: int = 48):
         super().__init__()
@@ -53,15 +54,18 @@ class ControlWidget(QWidget):
         self.start_button = QPushButton("Start Recording", self)
         self.stop_button = QPushButton("Stop Recording", self)
         self.exit_button = QPushButton("Exit", self)
+        self.enhancement_checkbox = QCheckBox("启用增强", self)
 
         main_layout = QVBoxLayout(self)
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.stop_button)
-        button_layout.addWidget(self.exit_button) # 添加退出按钮到布局
+        button_layout.addWidget(self.exit_button)
+        
         main_layout.addWidget(self.label_timer)
         main_layout.addLayout(button_layout)
-        self.resize(250, 150)
+        main_layout.addWidget(self.enhancement_checkbox) # 添加复选框到布局
+        self.resize(250, 180)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self._update_countdown)
@@ -74,10 +78,17 @@ class ControlWidget(QWidget):
         self.start_button.clicked.connect(self.start_requested.emit)
         self.stop_button.clicked.connect(self.stop_requested.emit)
         self.exit_button.clicked.connect(self.exit_requested.emit)
+        self.enhancement_checkbox.stateChanged.connect(self.enhancement_state_changed)
 
         self.set_idle_state()
         self.drag_pos: Optional[QMouseEvent] = None
         self._center_on_screen()
+
+    def enhancement_state_changed(self, state):
+        self.enhancement_toggled.emit(state == Qt.CheckState.Checked.value)
+
+    def set_enhancement_state(self, enabled: bool):
+        self.enhancement_checkbox.setChecked(enabled)
 
     def _ensure_on_top(self):
         """主动将窗口提升到顶层，确保其可见性。"""

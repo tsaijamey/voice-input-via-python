@@ -46,7 +46,8 @@ def main():
     app = QApplication(sys.argv)
     
     try:
-        config = ConfigLoader().load()
+        config_loader = ConfigLoader()
+        config = config_loader.load()
         logger.info("Configuration loaded successfully")
         
         # --- 初始化服务和状态 ---
@@ -82,13 +83,11 @@ def main():
                     audio_queue.task_done()
                     break
 
-                # 如果音频块太短，则忽略，以避免ASR产生幻觉
                 if len(audio_chunk) < min_chunk_samples:
                     logger.info(f"Skipping a short audio chunk with {len(audio_chunk)} samples.")
                     audio_queue.task_done()
                     continue
                 
-                # --- 增加诊断日志 ---
                 duration_seconds = len(audio_chunk) / recording_service.sample_rate
                 logger.info(
                     f"Sending chunk to ASR: "
@@ -105,15 +104,12 @@ def main():
                 )
                 
                 if transcript:
-                    # 1. 显示原始转录结果
                     logger.info(f"实时转录 (原始): {transcript}")
-                    raw_transcript_list.append(transcript) # 保存原始文本
+                    raw_transcript_list.append(transcript)
                     
-                    # 2. 对实时转录的片段进行修正
                     corrected_chunk = asr_service.correct_text(transcript)
                     logger.info(f"实时转录 (修正): {corrected_chunk}")
                     
-                    # 3. 拼接最终结果
                     full_transcript.append(corrected_chunk)
                     logger.info(f"当前完整文本: {' '.join(full_transcript)}")
                 
@@ -125,28 +121,30 @@ def main():
         def handle_toggle_recording(start: bool, window=None):
             nonlocal is_recording, transcription_worker_thread, vision_worker_thread, full_transcript, screen_context_result, raw_transcript_list, focused_window_at_start
             
+            enhancement_enabled = config['services']['content_enhancement'].get('enabled', False)
+
             if start and not is_recording:
                 is_recording = True
-                focused_window_at_start = window # 保存窗口信息
+                focused_window_at_start = window
                 logger.info("Recording started...")
                 
-                # --- 并行任务启动 ---
-                # 1. 启动视觉分析线程
-                def vision_worker():
-                    nonlocal screen_context_result
-                    logger.info("Capturing and analyzing screen...")
-                    screenshot = take_screenshot()
-                    resized_screenshot = resize_image(screenshot, max_screenshot_width)
-                    save_screenshot(resized_screenshot) # 保存调整尺寸后的截图
-                    screen_context_result = vision_service.analyze_screenshot(resized_screenshot)
-                    logger.info("Screen analysis complete.")
+                if enhancement_enabled:
+                    def vision_worker():
+                        nonlocal screen_context_result
+                        logger.info("Capturing and analyzing screen...")
+                        screenshot = take_screenshot()
+                        resized_screenshot = resize_image(screenshot, max_screenshot_width)
+                        save_screenshot(resized_screenshot)
+                        screen_context_result = vision_service.analyze_screenshot(resized_screenshot)
+                        logger.info("Screen analysis complete.")
+                    vision_worker_thread = threading.Thread(target=vision_worker, daemon=True)
+                    vision_worker_thread.start()
+                else:
+                    screen_context_result = None
+                    vision_worker_thread = None
 
-                vision_worker_thread = threading.Thread(target=vision_worker, daemon=True)
-                vision_worker_thread.start()
-
-                # 2. 启动录音和ASR转录线程
                 full_transcript = []
-                raw_transcript_list = [] # 重置原始文本列表
+                raw_transcript_list = []
                 while not audio_queue.empty():
                     audio_queue.get_nowait()
 
@@ -162,18 +160,14 @@ def main():
                 is_recording = False
                 logger.info("Recording stopped...")
                 
-                # 停止录音
                 recording_service.stop_recording()
-                
-                # 发送结束信号给ASR转录工作线程
                 audio_queue.put(None)
                 
-                # --- 等待并行任务完成 ---
                 logger.info("Waiting for transcription and vision analysis to complete...")
                 if transcription_worker_thread:
-                    transcription_worker_thread.join(timeout=10.0) # 增加超时
+                    transcription_worker_thread.join(timeout=10.0)
                 if vision_worker_thread:
-                    vision_worker_thread.join(timeout=20.0) # 视觉分析可能更耗时
+                    vision_worker_thread.join(timeout=20.0)
 
                 raw_text = ' '.join(raw_transcript_list)
                 corrected_text = ' '.join(full_transcript)
@@ -181,79 +175,59 @@ def main():
                 logger.info(f"最终识别文本 (修正): {corrected_text}")
                 logger.info(f"最终屏幕上下文: {screen_context_result}")
 
-                # 根据是否有修正后的文本来决定后续流程
                 final_text_for_processing = corrected_text if corrected_text else raw_text
+                output_text = final_text_for_processing
+                enhanced_text_result = None
 
-                if final_text_for_processing and screen_context_result:
-                    # --- 内容增强 ---
-                    enhanced_text = enhancement_service.enhance_text(final_text_for_processing, screen_context_result)
-                    logger.info(f"增强后文本: {enhanced_text}")
-                    
-                    # 决定粘贴或复制哪个文本
-                    output_text = enhanced_text
+                if enhancement_enabled and final_text_for_processing and screen_context_result:
+                    logger.info("Enhancing text with screen context...")
+                    enhanced_text_result = enhancement_service.enhance_text(final_text_for_processing, screen_context_result)
+                    logger.info(f"增强后文本: {enhanced_text_result}")
+                    output_text = enhanced_text_result
+                elif not enhancement_enabled:
+                    logger.info("Content enhancement is disabled. Skipping.")
+                elif not screen_context_result:
+                     logger.warning("Vision analysis failed or returned no result. Falling back to transcript.")
+
+                if output_text:
                     if config['output'].get('mode', 'clipboard') == 'paste' and focused_window_at_start:
                         InputAutomationService.paste_to_window(focused_window_at_start, output_text)
                     else:
                         copy_to_clipboard(output_text)
-                    
-                    # 保存所有版本
-                    save_to_file(
-                        raw_text=raw_text,
-                        corrected_text=corrected_text,
-                        enhanced_text=enhanced_text,
-                        vision_analysis=screen_context_result
-                    )
-                elif final_text_for_processing:
-                    # 如果视觉分析失败，则回退到只输出识别文本
-                    logger.warning("Vision analysis failed or returned no result. Falling back to transcript.")
-                    output_text = final_text_for_processing
-                    if config['output'].get('mode', 'clipboard') == 'paste' and focused_window_at_start:
-                        InputAutomationService.paste_to_window(focused_window_at_start, output_text)
-                    else:
-                        copy_to_clipboard(output_text)
-                    
-                    # 仍然保存所有可用信息
-                    save_to_file(
-                        raw_text=raw_text,
-                        corrected_text=corrected_text,
-                        enhanced_text=None, # 没有增强文本
-                        vision_analysis=screen_context_result # 可能是None
-                    )
                 else:
                     logger.warning("没有识别到任何文本，跳过输出。")
 
-                control_widget.set_idle_state()
-                focused_window_at_start = None # 重置窗口信息
+                save_to_file(
+                    raw_text=raw_text,
+                    corrected_text=corrected_text,
+                    enhanced_text=enhanced_text_result,
+                    vision_analysis=screen_context_result
+                )
 
-        # --- 连接所有信号到统一的处理器 ---
+                control_widget.set_idle_state()
+                focused_window_at_start = None
+
         communicator.toggle_signal.connect(handle_toggle_recording)
         control_widget.start_requested.connect(lambda: handle_toggle_recording(True))
         control_widget.stop_requested.connect(lambda: handle_toggle_recording(False))
         
-        # --- 优雅退出逻辑 ---
         def shutdown_application():
             logger.info("Application shutting down...")
             hotkey_manager.stop()
             
-            # 确保录音停止
             if is_recording:
                 handle_toggle_recording(False)
 
-            # 等待转录线程结束
             if transcription_worker_thread and transcription_worker_thread.is_alive():
-                audio_queue.put(None) # 发送停止信号
+                audio_queue.put(None)
                 transcription_worker_thread.join(timeout=5.0)
 
             logger.info("Shutdown complete.")
             QApplication.quit()
 
-        # 连接GUI退出按钮
         control_widget.exit_requested.connect(shutdown_application)
-        
-        # 捕获 Ctrl+C 信号
         signal.signal(signal.SIGINT, lambda sig, frame: shutdown_application())
         
-        # PySide6 需要一个定时器来确保 Python 的信号处理器能被主事件循环调用
         timer = QTimer()
         timer.start(500)
         timer.timeout.connect(lambda: None)
@@ -267,7 +241,24 @@ def main():
         )
         
         hotkey_manager.start()
-        control_widget.show() # 启动时显示控制面板
+        
+        # --- UI 与配置双向绑定 ---
+        # 1. 应用启动时，根据配置设置UI
+        enhancement_enabled = config['services']['content_enhancement'].get('enabled', False)
+        control_widget.set_enhancement_state(enhancement_enabled)
+
+        # 2. 当UI开关变化时，更新配置并保存
+        def on_enhancement_toggled(enabled):
+            config['services']['content_enhancement']['enabled'] = enabled
+            # 更新原始配置以备保存
+            if 'original_services' in config and 'content_enhancement' in config['original_services']:
+                config['original_services']['content_enhancement']['enabled'] = enabled
+            config_loader.save(config)
+            logger.info(f"Content enhancement set to: {enabled}")
+
+        control_widget.enhancement_toggled.connect(on_enhancement_toggled)
+        
+        control_widget.show()
         logger.info("Application started. Use the 'Exit' button or press Ctrl+C to quit.")
         
         sys.exit(app.exec())
