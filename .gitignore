@@ -196,4 +196,5 @@ cython_debug/
 .DS_Store
 recordings/
 docs/plans/
+docs/HOWTO/
 code_sample/
