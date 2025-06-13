@@ -195,5 +195,5 @@ cython_debug/
 # Custom ignores for this project
 .DS_Store
 recordings/
-docs/
+docs/plans/
 code_sample/
