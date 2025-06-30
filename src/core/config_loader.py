@@ -67,6 +67,10 @@ class ConfigLoader:
 
         # 解析常规服务配置
         for service_name, service_config in services_to_resolve.items():
+            if service_name == 'text_processing':
+                resolved_services[service_name] = service_config.copy()
+                continue
+
             provider_index = service_config.get('provider_index')
             model_index = service_config.get('model_index')
 
