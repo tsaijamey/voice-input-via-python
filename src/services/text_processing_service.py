@@ -54,9 +54,9 @@ class TextProcessingService(QObject):
         # 初始化翻译服务
         try:
             config_data = self._config.load()
-            translation_config = config_data['text_processing']['translation_service']
+            translation_config = config_data['services']['translation']
             self._translation_service = TranslationService(translation_config)
-            self._text_processing_config = config_data['text_processing']
+            self._text_processing_config = config_data['services']['text_processing']
         except Exception as e:
             self.logger.error(f"Failed to initialize translation service: {e}")
             self._translation_service = None

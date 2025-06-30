@@ -11,7 +11,7 @@ class TranslationService:
         初始化翻译服务。
 
         Args:
-            config (dict): 解析后的 'translation_service' 服务配置。
+            config (dict): 解析后的 'translation' 服务配置。
         """
         api_key = config.get('api_key')
         if not api_key:
