@@ -119,24 +119,15 @@ class ASRService:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "你是一个专业的速记员和文本修正师。"
-                            "你的任务是修正ASR（自动语音识别）的输出结果，而不是润色或再创作。"
-                            "请严格遵循以下规则：\n"
-                            "1.  **仅**根据整体文本内容，找出可能存在的发音相似但明显错误的词语（例如，错别字），然后修正。\n"
-                            "2.  根据上下文添加合理且必要的标点符号，使句子结构完整。\n"
-                            "3.  如果内容包含代码或专业术语，请确保其格式正确。\n"
-                            "4.  务必结合上下文，分析已有的结果，由于结果来自语音识别，必然存在噪音、其他人说话干扰导致的额外文字、模糊语音识别错误，从正常的、自然的、普通的逻辑出发，理解内容，并找出可疑的内容，修正它们。你要输出的是合理的文字，而不是明显语义奇怪的内容\n"
-                            "5.  直接输出修正后的文本，仅指包含任何与原始文本内容无关的解释或额外说明。"
-                        )
+                        "content": "你是一个专业的文本整理助手。以下文本是实时语音转写的结果，其中不包含任何标点符号。你的任务是��1. 将其整理成通顺、专业的书面语。2. 在保持原意的基础上，正确地添加标点符号。3. **绝对不要**在原始文本信息之外添加任何猜测性的、或任何不存在的文字、内容或信息。"
                     },
                     {
                         "role": "user",
-                        "content": f"请修正以下ASR识别结果：\n\n{text}\n\n 输出格式：\n[修正后的文本内容]",
+                        "content": text,
                     }
                 ],
                 model=self.correction_config['model'],
-                temperature=self.correction_config.get('temperature', 0.7),
+                temperature=self.correction_config.get('temperature', 0.3),
             )
             corrected_text = chat_completion.choices[0].message.content
             return corrected_text.strip() if corrected_text else text

@@ -1,7 +1,7 @@
 import sys
 import logging
-from typing import Optional
-
+from typing import Optional, Literal
+from enum import Enum, auto
 from PySide6.QtCore import Qt, QTimer, Signal, Property, QPoint, QRect, QSize
 from PySide6.QtWidgets import QApplication, QLabel, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QAbstractButton, QSizePolicy
 from PySide6.QtGui import QScreen, QMouseEvent, QPainter, QColor, QBrush, QPen
@@ -44,10 +44,18 @@ class Switch(QAbstractButton):
         return QSize(51, 31)
 
 
+class UIState(Enum):
+    """UI状态枚举"""
+    IDLE = auto()        # 初始就绪状态
+    RECORDING = auto()    # 录音中状态
+    PROCESSING = auto()  # 文本处理中状态
+    FINISHED = auto()     # 处理完成状态
+
+
 class ControlWidget(QWidget):
     """
     一个迷你的GUI控制面板，包含开始/停止按钮和倒计时显示。
-    被设计为在主GUI线程中创建和操作。
+    被设计为在主GUI线程中创建和操作，使用状态机管理UI状态。
     """
     start_requested = Signal()
     stop_requested = Signal()
@@ -61,6 +69,7 @@ class ControlWidget(QWidget):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.remaining_seconds = 0
+        self._state = UIState.IDLE
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
@@ -164,7 +173,9 @@ class ControlWidget(QWidget):
 
 
     def set_idle_state(self):
+        """设置空闲状态，允许从任何状态转换"""
         self.logger.info("UI set to idle state.")
+        self._state = UIState.IDLE
         self.countdown_timer.stop()
         self.keep_on_top_timer.stop()
         self.label_timer.setText("Ready")
@@ -194,7 +205,12 @@ class ControlWidget(QWidget):
         self.adjustSize()
     
     def set_recording_state(self, seconds: int):
+        """设置录音状态，只允许从IDLE状态转换"""
+        if self._state != UIState.IDLE:
+            raise ValueError(f"Cannot transition to RECORDING from {self._state}")
+            
         self.logger.info(f"UI set to recording state for {seconds} seconds.")
+        self._state = UIState.RECORDING
         self.remaining_seconds = seconds
         self.label_timer.setText(str(self.remaining_seconds))
         self.start_button.hide()
@@ -205,9 +221,24 @@ class ControlWidget(QWidget):
         self.countdown_timer.start(1000)
         self.keep_on_top_timer.start()
     
+    def set_processing_state(self):
+        """设置处理中状态，允许从RECORDING或IDLE状态转换"""
+        if self._state not in (UIState.RECORDING, UIState.IDLE):
+            raise ValueError(f"Cannot transition to PROCESSING from {self._state}")
+            
+        self.logger.info("UI set to processing state.")
+        self._state = UIState.PROCESSING
+        self.countdown_timer.stop()
+        self.label_timer.setText("Processing...")
+        self.stop_button.hide()
+
     def set_finished_state(self, final_text: str):
-        """设置录音完成状态，显示最终转写文本"""
+        """设置完成状态，显示最终转写文本，允许从PROCESSING、RECORDING或IDLE状态转换"""
+        if self._state not in (UIState.PROCESSING, UIState.RECORDING, UIState.IDLE):
+            raise ValueError(f"Cannot transition to FINISHED from {self._state}")
+            
         self.logger.info("UI set to finished state.")
+        self._state = UIState.FINISHED
         self.countdown_timer.stop()
         self.keep_on_top_timer.stop()
         self.start_button.show()
@@ -235,3 +266,8 @@ class ControlWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         self.drag_pos = None
+    
+    @property
+    def state(self) -> UIState:
+        """获取当前UI状态"""
+        return self._state

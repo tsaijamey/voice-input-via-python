@@ -65,6 +65,7 @@ class ConfigLoader:
         services_to_resolve = self._config.get('services', {})
         resolved_services = {}
 
+        # 解析常规服务配置
         for service_name, service_config in services_to_resolve.items():
             provider_index = service_config.get('provider_index')
             model_index = service_config.get('model_index')
@@ -103,9 +104,52 @@ class ConfigLoader:
         
         self._config['services'] = resolved_services
 
+        # 解析text_processing中的服务配置
+        if 'text_processing' in self._config:
+            text_processing = self._config['text_processing']
+            for service_name in ['translation_service', 'style_enhancement_service']:
+                if service_name in text_processing:
+                    service_config = text_processing[service_name]
+                    provider_index = service_config.get('provider_index')
+                    model_index = service_config.get('model_index')
+
+                    if provider_index is None or model_index is None:
+                        raise ValueError(f"Text processing service '{service_name}' is missing 'provider_index' or 'model_index'.")
+
+                    if not (0 <= provider_index < len(providers)):
+                        raise ValueError(f"Invalid 'provider_index' {provider_index} for text processing service '{service_name}'.")
+                    
+                    provider = providers[provider_index]
+                    
+                    if not (0 <= model_index < len(provider.get('models', []))):
+                        raise ValueError(f"Invalid 'model_index' {model_index} for text processing service '{service_name}' in provider '{provider.get('name')}'.")
+
+                    model = provider['models'][model_index]
+                    api_key_env = provider.get('api_key_env')
+                    api_key = os.getenv(api_key_env) if api_key_env else None
+
+                    if api_key_env and not api_key:
+                        raise ValueError(f"Environment variable '{api_key_env}' for provider '{provider.get('name')}' is not set.")
+
+                    # 合并配置到text_processing服务
+                    text_processing[service_name].update({
+                        'provider': provider.get('name'),
+                        'model': model.get('name'),
+                        'api_key': api_key,
+                        **model
+                    })
+
     def _validate_resolved_services(self) -> None:
         """验证解析后的服务配置是否齐全"""
         required_services = ['asr', 'text_correction', 'vision', 'content_enhancement']
         for service in required_services:
             if service not in self._config.get('services', {}):
                 raise ValueError(f"Missing configuration for required service: '{service}'")
+            
+            # 验证text_processing配置
+            if 'text_processing' in self._config:
+                text_processing = self._config['text_processing']
+                if not isinstance(text_processing.get('style_options', []), list):
+                    raise ValueError("text_processing.style_options must be a list")
+                if not isinstance(text_processing.get('translation_logic', {}), dict):
+                    raise ValueError("text_processing.translation_logic must be a dict")

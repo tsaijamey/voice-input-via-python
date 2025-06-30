@@ -106,7 +106,7 @@ class RecordingService:
                 channels=self.channels,
                 dtype=self.dtype,
                 callback=self._audio_callback,
-                blocksize=0, # 使用0让sounddevice自动选择最佳块大小
+                blocksize=1024, # 使用一个固定的、安全的值代替0
                 latency='low'
             ) as self.stream:
                 self.stop_event.wait()

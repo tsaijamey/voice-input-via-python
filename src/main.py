@@ -7,6 +7,9 @@ import queue
 import signal
 import os
 import soundfile as sf
+import platform
+import subprocess
+from PySide6.QtWidgets import QMessageBox
 
 from dotenv import load_dotenv
 from PySide6.QtWidgets import QApplication
@@ -20,8 +23,10 @@ from services.timer_overlay import ControlWidget
 from services.vision_service import VisionService
 from services.content_enhancement_service import ContentEnhancementService
 from utils.screenshot_util import take_screenshot, resize_image, save_screenshot
+from utils.audio_utils import is_speech
 from output_handler import copy_to_clipboard, save_to_file
 from services.input_automation_service import InputAutomationService
+from services.text_processing_service import TextProcessingService
 
 class Communicate(QObject):
     """用于跨线程通信的信号类"""
@@ -36,6 +41,61 @@ def setup_logging():
         handlers=[logging.StreamHandler(sys.stdout)]
     )
 
+def check_system_permissions():
+    """检查系统必要的权限"""
+    system = platform.system()
+    logger = logging.getLogger(__name__)
+    
+    if system == 'Darwin':  # macOS
+        try:
+            # 获取终端应用名称(如Terminal或iTerm2)
+            terminal_name = os.path.basename(os.environ.get('TERM_PROGRAM', 'Terminal'))
+            
+            # 获取Python解释器路径
+            python_path = sys.executable
+            python_name = 'Python' if 'pyenv' in python_path else os.path.basename(python_path)
+            
+            # 使用AppleScript检查辅助功能权限
+            script = f"""
+            tell application "System Events"
+                set is_ui_enabled to UI elements enabled
+                set term_allowed to exists (processes where name is "{terminal_name}")
+                set python_allowed to exists (processes where name is "{python_name}")
+                return is_ui_enabled and (term_allowed or python_allowed)
+            end tell
+            """
+            result = subprocess.run(['osascript', '-e', script],
+                                  capture_output=True, text=True)
+            
+            logger.debug(f"Permission check result: {result.stdout.strip()}")
+            
+            if "true" not in result.stdout.lower():
+                logger.error(f"MacOS accessibility permission not granted for {terminal_name}!")
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Warning)
+                msg.setText("需要辅助功能权限")
+                msg.setInformativeText(
+                    f"请前往系统设置 > 隐私与安全性 > 辅助功能\n"
+                    f"添加 '{terminal_name}' 或 '{python_name}' 到允许列表\n"
+                    f"然后重新启动应用\n\n"
+                    f"终端应用: {terminal_name}\n"
+                    f"Python解释器: {python_name}")
+                msg.setWindowTitle("权限要求")
+                msg.exec_()
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to check macOS permissions: {e}")
+    
+    elif system == 'Windows':
+        # Windows可能需要UAC权限检查
+        logger.debug("Windows system detected")
+    
+    elif system == 'Linux':
+        # Linux可能需要xhost权限检查
+        logger.debug("Linux system detected")
+    
+    return True
+
 def main():
     """主应用入口"""
     # 在所有操作之前加载环境变量
@@ -45,6 +105,11 @@ def main():
     logger = logging.getLogger(__name__)
 
     app = QApplication(sys.argv)
+    
+    # 检查系统权限
+    if not check_system_permissions():
+        logger.error("Application cannot continue without required permissions")
+        return 1
     
     try:
         config_loader = ConfigLoader()
@@ -59,9 +124,11 @@ def main():
             correction_config=config['services']['text_correction']
         )
         control_widget = ControlWidget()
+        control_widget.set_idle_state()  # [修复] 设置UI的初始状态
         vision_service = VisionService(config['services']['vision'])
         enhancement_service = ContentEnhancementService(config['services']['content_enhancement'])
         max_screenshot_width = config['services']['vision'].get('max_width', 1200)
+        input_service = InputAutomationService()
         
         is_recording = False
         audio_queue = queue.Queue()
@@ -81,6 +148,12 @@ def main():
                 if audio_chunk is None:
                     audio_queue.task_done()
                     break
+
+                # [关键调整] 在此处加入VAD检测
+                if not is_speech(audio_chunk, recording_service.sample_rate):
+                    logger.info("Skipping non-speech audio chunk.")
+                    audio_queue.task_done()
+                    continue
 
                 if len(audio_chunk) < min_chunk_samples:
                     logger.info(f"Skipping a short audio chunk with {len(audio_chunk)} samples.")
@@ -106,13 +179,9 @@ def main():
                     logger.info(f"实时转录 (原始): {transcript}")
                     raw_transcript_list.append(transcript)
                     
-                    corrected_chunk = asr_service.correct_text(transcript)
-                    logger.info(f"实时转录 (修正): {corrected_chunk}")
-                    
-                    full_transcript.append(corrected_chunk)
-                    current_full_text = ' '.join(full_transcript)
-                    logger.info(f"当前完整文本: {current_full_text}")
-                    communicator.transcription_update_signal.emit(current_full_text, False) # False表示覆盖
+                    # [关键调整] 直接使用原始文本更新UI
+                    current_raw_text = ' '.join(raw_transcript_list)
+                    communicator.transcription_update_signal.emit(current_raw_text, False)
                 
                 audio_queue.task_done()
             logger.info("Transcription worker finished.")
@@ -176,9 +245,19 @@ def main():
                     vision_worker_thread.join(timeout=20.0)
 
                 raw_text = ' '.join(raw_transcript_list)
-                corrected_text = ' '.join(full_transcript)
                 logger.info(f"最终识别文本 (原始): {raw_text}")
-                logger.info(f"最终识别文本 (修正): {corrected_text}")
+
+                # 新增：预处理和终末修正
+                corrected_text = ""
+                if raw_text:
+                    # 预处理：去除标点
+                    pre_processed_text = raw_text.replace(',', ' ').replace('。', ' ')
+                    logger.info(f"预处理后文本: {pre_processed_text}")
+                    
+                    # 调用Llama3进行最终整理
+                    corrected_text = asr_service.correct_text(pre_processed_text)
+                    logger.info(f"最终识别文本 (修正): {corrected_text}")
+
                 logger.info(f"最终屏幕上下文: {screen_context_result}")
 
                 final_text_for_processing = corrected_text if corrected_text else raw_text
@@ -214,8 +293,10 @@ def main():
                 # 这会用最终文本覆盖掉实时追加的内容
                 control_widget.set_finished_state(output_text or "")
                 focused_window_at_start = None
-
+        
+        # [修复] 将热键信号连接到处理函数
         communicator.toggle_signal.connect(handle_toggle_recording)
+
         control_widget.start_requested.connect(lambda: handle_toggle_recording(True))
         control_widget.stop_requested.connect(lambda: handle_toggle_recording(False))
         
@@ -240,13 +321,31 @@ def main():
         timer.start(500)
         timer.timeout.connect(lambda: None)
 
-        def on_toggle_recording_emitter(is_start: bool, window=None):
-            communicator.toggle_signal.emit(is_start, window)
+        # This function will now handle the state toggle
+        def toggle_recording_callback(pressed, window):
+            nonlocal is_recording
+            if pressed: # Only act on press
+                # The core logic is now here
+                is_start = not is_recording
+                communicator.toggle_signal.emit(is_start, window)
 
-        hotkey_manager.register_toggle(
-            config['hotkeys']['toggle_recording'],
-            on_toggle_recording_emitter
+        # 初始化文本处理服务（使用独立UI）
+        text_processing_service = TextProcessingService(
+            config=config_loader,
+            input_service=input_service
         )
+
+        # 注册热键
+        hotkey_manager.register_hotkey(
+            config['hotkeys']['toggle_recording'],
+            toggle_recording_callback
+        )
+        
+        if 'process_text' in config['hotkeys']:
+            hotkey_manager.register_hotkey(
+                config['hotkeys']['process_text'],
+                lambda pressed, _: text_processing_service.start_processing() if pressed else None
+            )
         
         hotkey_manager.start()
         
@@ -263,8 +362,13 @@ def main():
                 config['original_services']['content_enhancement']['enabled'] = enabled
             config_loader.save(config)
             logger.info(f"Content enhancement set to: {enabled}")
-
+        
         control_widget.enhancement_toggled.connect(on_enhancement_toggled)
+        
+        # 连接文本处理错误信号
+        text_processing_service.error_occurred.connect(
+            lambda msg: control_widget.update_transcription(f"处理错误: {msg}")
+        )
         
         control_widget.show()
         logger.info("Application started. Use the 'Exit' button or press Ctrl+C to quit.")

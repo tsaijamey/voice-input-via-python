@@ -1,6 +1,7 @@
 {
   "hotkeys": {
-    "toggle_recording": "alt"
+    "toggle_recording": "alt",
+    "process_text": "ctrl+shift"
   },
   "recording": {
     "countdown_seconds": 60,
@@ -30,7 +31,7 @@
       "api_key_env": "GEMINI_API_KEY",
       "models": [
         {
-          "name": "gemini-2.5-flash-preview-05-20",
+          "name": "gemini-2.5-flash",
           "type": "vision"
         }
       ]
@@ -56,6 +57,48 @@
       "provider_index": 0,
       "model_index": 1
     }
+  },
+  "text_processing": {
+    "translation_service": {
+      "provider_index": 0,
+      "model_index": 1,
+      "temperature": 0.3,
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "name": "llama-3.3-70b-versatile",
+      "type": "llm"
+    },
+    "style_enhancement_service": {
+      "provider_index": 0,
+      "model_index": 1,
+      "temperature": 0.7,
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "name": "llama-3.3-70b-versatile",
+      "type": "llm"
+    },
+    "style_options": [
+      {
+        "name": "社媒风格",
+        "prompt": "请将以下文本转换为适合在社交媒体发布的风格，使其更具吸引力和传播性。"
+      },
+      {
+        "name": "正式邮件",
+        "prompt": "请将以下文本改写为一封正式的商务邮件，语气专业、措辞得体。"
+      },
+      {
+        "name": "技术文档",
+        "prompt": "请将以下文本改写为清晰、准确的技术文档格式，包含必要的结构和说明。"
+      }
+    ],
+    "translation_logic": {
+      "zh_to": "English",
+      "en_to": "Chinese",
+      "default_to": "English"
+    },
+    "clipboard_timeout_seconds": 5.0,
+    "retry_attempts": 5,
+    "hotkey_release_delay_seconds": 0.1
   },
   "proxy": {
     "http": "http://localhost:7890",
